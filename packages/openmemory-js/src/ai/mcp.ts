@@ -8,6 +8,7 @@ import {
     add_hsg_memory,
     hsg_query,
     reinforce_memory,
+    delete_memory,
     sector_configs,
 } from "../memory/hsg";
 import { q, all_async, memories_table, vector_store } from "../core/db";
@@ -17,6 +18,7 @@ import type { sector_type, mem_row, rpc_err_code } from "../core/types";
 import { update_user_summary } from "../memory/user_summary";
 import { insert_fact } from "../temporal_graph/store";
 import { query_facts_at_time } from "../temporal_graph/query";
+import { ToolRegistry } from "./mcp_tools";
 
 const sec_enum = z.enum([
     "episodic",
@@ -87,7 +89,9 @@ export const create_mcp_srv = () => {
         { capabilities: { tools: {}, resources: {}, logging: {} } },
     );
 
-    srv.tool(
+    const registry = new ToolRegistry();
+
+    registry.tool(
         "openmemory_query",
         "Query OpenMemory for contextual memories (HSG) and/or temporal facts",
         {
@@ -164,13 +168,15 @@ export const create_mcp_srv = () => {
             const results: any = { type, query };
             const at_date = at ? new Date(at) : new Date();
 
-            // Query HSG if contextual or unified
+
             if (type === "contextual" || type === "unified") {
                 const flt =
                     sector || min_salience !== undefined || u
                         ? {
                             ...(sector ? { sectors: [sector as sector_type] } : {}),
-                            ...(min_salience !== undefined ? { minSalience: min_salience } : {}),
+                            ...(min_salience !== undefined
+                                ? { minSalience: min_salience }
+                                : {}),
                             ...(u ? { user_id: u } : {}),
                         }
                         : undefined;
@@ -189,14 +195,14 @@ export const create_mcp_srv = () => {
                 }));
             }
 
-            // Query temporal facts if factual or unified
+
             if (type === "factual" || type === "unified") {
                 const facts = await query_facts_at_time(
                     fact_pattern?.subject,
                     fact_pattern?.predicate,
                     fact_pattern?.object,
                     at_date,
-                    0.0, // min_confidence
+                    0.0,
                 );
 
                 results.factual = facts.map((f: any) => ({
@@ -212,7 +218,7 @@ export const create_mcp_srv = () => {
                 }));
             }
 
-            // Format text summary
+
             let summ = "";
             if (type === "contextual") {
                 summ = results.contextual.length
@@ -230,7 +236,7 @@ export const create_mcp_srv = () => {
                         .join("\n\n");
                 }
             } else {
-                // unified
+
                 const ctx_count = results.contextual?.length || 0;
                 const fact_count = results.factual?.length || 0;
                 summ = `Found ${ctx_count} contextual memories and ${fact_count} temporal facts.\n\n`;
@@ -267,7 +273,7 @@ export const create_mcp_srv = () => {
         },
     );
 
-    srv.tool(
+    registry.tool(
         "openmemory_store",
         "Persist new content into OpenMemory (HSG contextual memory and/or temporal facts)",
         {
@@ -283,7 +289,10 @@ export const create_mcp_srv = () => {
                 .array(
                     z.object({
                         subject: z.string().min(1).describe("Fact subject (entity)"),
-                        predicate: z.string().min(1).describe("Fact predicate (relationship)"),
+                        predicate: z
+                            .string()
+                            .min(1)
+                            .describe("Fact predicate (relationship)"),
                         object: z.string().min(1).describe("Fact object (value)"),
                         confidence: z
                             .number()
@@ -294,14 +303,19 @@ export const create_mcp_srv = () => {
                         valid_from: z
                             .string()
                             .optional()
-                            .describe("ISO date string for fact validity start (default: now)"),
+                            .describe(
+                                "ISO date string for fact validity start (default: now)",
+                            ),
                     }),
                 )
                 .optional()
                 .describe(
                     "Array of facts to store in temporal graph. Required when type is 'factual' or 'both'",
                 ),
-            tags: z.array(z.string()).optional().describe("Optional tag list (for HSG storage)"),
+            tags: z
+                .array(z.string())
+                .optional()
+                .describe("Optional tag list (for HSG storage)"),
             metadata: z
                 .record(z.any())
                 .optional()
@@ -319,14 +333,17 @@ export const create_mcp_srv = () => {
             const u = uid(user_id);
             const results: any = { type };
 
-            // Validate facts are provided when needed
-            if ((type === "factual" || type === "both") && (!facts || facts.length === 0)) {
+
+            if (
+                (type === "factual" || type === "both") &&
+                (!facts || facts.length === 0)
+            ) {
                 throw new Error(
                     `Facts array is required when type is '${type}'. Please provide at least one fact.`,
                 );
             }
 
-            // Store in HSG if contextual or both
+
             if (type === "contextual" || type === "both") {
                 const res = await add_hsg_memory(
                     content,
@@ -339,7 +356,7 @@ export const create_mcp_srv = () => {
                     primary_sector: res.primary_sector,
                     sectors: res.sectors,
                 };
-                
+
                 if (u) {
                     update_user_summary(u).catch((err) =>
                         console.error("[MCP] user summary update failed:", err),
@@ -347,7 +364,7 @@ export const create_mcp_srv = () => {
                 }
             }
 
-            // Store in temporal graph if factual or both
+
             if ((type === "factual" || type === "both") && facts) {
                 const temporal_results = [];
                 for (const fact of facts) {
@@ -355,7 +372,7 @@ export const create_mcp_srv = () => {
                         ? new Date(fact.valid_from)
                         : new Date();
                     const confidence = fact.confidence ?? 1.0;
-                    
+
                     const fact_id = await insert_fact(
                         fact.subject,
                         fact.predicate,
@@ -364,7 +381,7 @@ export const create_mcp_srv = () => {
                         confidence,
                         metadata,
                     );
-                    
+
                     temporal_results.push({
                         id: fact_id,
                         subject: fact.subject,
@@ -377,7 +394,7 @@ export const create_mcp_srv = () => {
                 results.temporal = temporal_results;
             }
 
-            // Format response
+
             let txt = "";
             if (type === "contextual") {
                 txt = `Stored memory ${results.hsg.id} (primary=${results.hsg.primary_sector}) across sectors: ${results.hsg.sectors.join(", ")}${u ? ` [user=${u}]` : ""}`;
@@ -403,7 +420,7 @@ export const create_mcp_srv = () => {
         },
     );
 
-    srv.tool(
+    registry.tool(
         "openmemory_reinforce",
         "Boost salience for an existing memory",
         {
@@ -428,7 +445,38 @@ export const create_mcp_srv = () => {
         },
     );
 
-    srv.tool(
+    registry.tool(
+        "openmemory_delete",
+        "Delete a memory by identifier",
+        {
+            id: z.string().min(1).describe("Memory identifier to delete"),
+            user_id: z.string().trim().min(1).optional().describe("Validate ownership"),
+        },
+        async ({ id, user_id }) => {
+            const u = uid(user_id);
+            if (u) {
+                // Pre-check ownership if user_id provided
+                const mem = await q.get_mem.get(id);
+                if (mem && mem.user_id !== u) {
+                    throw new Error(`Memory ${id} not found for user ${u}`);
+                }
+            }
+
+            const success = await delete_memory(id);
+            if (!success) {
+                return {
+                    content: [{ type: "text", text: `Memory ${id} not found or could not be deleted.` }],
+                    isError: true
+                };
+            }
+
+            return {
+                content: [{ type: "text", text: `Memory ${id} successfully deleted.` }],
+            };
+        },
+    );
+
+    registry.tool(
         "openmemory_list",
         "List recent memories for quick inspection",
         {
@@ -439,9 +487,7 @@ export const create_mcp_srv = () => {
                 .max(50)
                 .default(10)
                 .describe("Number of memories to return"),
-            sector: sec_enum
-                .optional()
-                .describe("Optionally limit to a sector"),
+            sector: sec_enum.optional().describe("Optionally limit to a sector"),
             user_id: z
                 .string()
                 .trim()
@@ -483,7 +529,7 @@ export const create_mcp_srv = () => {
         },
     );
 
-    srv.tool(
+    registry.tool(
         "openmemory_get",
         "Fetch a single memory by identifier",
         {
@@ -543,6 +589,7 @@ export const create_mcp_srv = () => {
             };
         },
     );
+    registry.apply(srv);
 
     srv.resource(
         "openmemory-config",
@@ -582,7 +629,7 @@ export const create_mcp_srv = () => {
     );
 
     srv.server.oninitialized = () => {
-        // Use stderr for debug output, not stdout
+
         console.error(
             "[MCP] initialization completed with client:",
             srv.server.getClientVersion(),
@@ -683,7 +730,7 @@ export const start_mcp_stdio = async () => {
     const srv = create_mcp_srv();
     const trans = new StdioServerTransport();
     await srv.connect(trans);
-    // console.error("[MCP] STDIO transport connected"); // Use stderr for debug output, not stdout
+
 };
 
 if (typeof require !== "undefined" && require.main === module) {
