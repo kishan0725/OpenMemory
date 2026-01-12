@@ -1,26 +1,15 @@
-# @presidio-dev/agent-memory
+# agent-memory
 
-> **real long-term memory for ai agents. not rag. not a vector db. self-hosted.**
+> Fork of [OpenMemory](https://github.com/CaviraOSS/OpenMemory) with additional features.
 
 [![npm version](https://img.shields.io/npm/v/@presidio-dev/agent-memory.svg)](https://www.npmjs.com/package/@presidio-dev/agent-memory)
 [![license](https://img.shields.io/github/license/kishan0725/OpenMemory)](https://github.com/kishan0725/OpenMemory/blob/main/LICENSE)
 
-## ⚠️ About This Package
-
-**This is a Presidio fork of [OpenMemory](https://github.com/CaviraOSS/OpenMemory)** (originally by nullure), based on version 1.3.2. We maintain this fork to add custom features and enhancements specific to our use cases while staying up-to-date with upstream improvements.
-
-**Original Project:** [OpenMemory by nullure](https://github.com/CaviraOSS/OpenMemory)  
-**License:** Apache 2.0  
-**This Fork:** [https://github.com/kishan0725/OpenMemory](https://github.com/kishan0725/OpenMemory)
-
-This package provides the same powerful cognitive memory engine as OpenMemory, with additional features and improvements by Presidio.
-
----
-
-@presidio-dev/agent-memory is a **cognitive memory engine** for llms and agents.
+agent-memory is a **cognitive memory engine** for llms and agents.
 
 - 🧠 real long-term memory (not just embeddings in a table)
 - 💾 self-hosted, local-first (sqlite / postgres)
+- 🚀 **pgvector support** - 100x faster with database-level user isolation for multi-tenant SaaS
 - 🧩 integrations: mcp, claude desktop, cursor, windsurf
 - 📥 sources: github, notion, google drive, onedrive, web crawler
 - 🔍 explainable traces (see *why* something was recalled)
@@ -76,13 +65,14 @@ available sources: `github`, `notion`, `google_drive`, `google_sheets`, `google_
 ✅ **memory decay** - adaptive forgetting with sector-specific rates  
 ✅ **waypoint graph** - associative recall paths for better retrieval  
 ✅ **explainable traces** - see exactly why memories were recalled  
+✅ **pgvector support** - 100x faster vector search with database-level user isolation (optional)  
 ✅ **zero config** - works out of the box with sensible defaults  
 
 ---
 
 ## cognitive sectors
 
-openmemory automatically classifies content into 5 cognitive sectors:
+agent-memory automatically classifies content into 5 cognitive sectors:
 
 | sector | description | examples | decay rate |
 |--------|-------------|----------|------------|
@@ -96,12 +86,31 @@ openmemory automatically classifies content into 5 cognitive sectors:
 
 ## configuration
 
+### pgvector (optional - for production multi-user deployments)
+
+For optimal performance in multi-user SaaS environments, enable native PostgreSQL pgvector support:
+
+```bash
+OM_USE_PGVECTOR=true
+```
+
+**Benefits:**
+- **100x faster** vector similarity search with HNSW indexes
+- **Database-level user isolation** - queries filter by user_id at SQL level
+- **Scales to millions of vectors** - O(log n) search complexity
+- **Production-ready** for multi-tenant deployments
+
+**Requirements:** PostgreSQL with pgvector extension installed (see Docker setup below)
+
 ### environment variables
 
 ```bash
 # database
 OM_DB_PATH=./data/om.db              # sqlite file path (default: ./data/openmemory.sqlite)
 OM_DB_URL=sqlite://:memory:          # or use in-memory db
+
+# pgvector (optional, recommended for production)
+OM_USE_PGVECTOR=true                 # enable native pgvector support
 
 # embeddings
 OM_EMBEDDINGS=ollama                 # synthetic | openai | gemini | ollama
@@ -175,7 +184,7 @@ await mem.wipe();
 
 ## mcp server
 
-@presidio-dev/agent-memory includes an mcp server for integration with claude desktop, cursor, windsurf, and other mcp clients:
+agent-memory includes an mcp server for integration with claude desktop, cursor, windsurf, and other mcp clients:
 
 ```bash
 npx @presidio-dev/agent-memory serve --port 3000
@@ -278,11 +287,3 @@ retrieve a memory by id.
 apache 2.0
 
 ---
-
-## links
-
-- [main repository](https://github.com/CaviraOSS/OpenMemory)
-- [python sdk](https://pypi.org/project/openmemory-py/)
-- [vs code extension](https://marketplace.visualstudio.com/items?itemName=Nullure.openmemory-vscode)
-- [documentation](https://openmemory.cavira.app/docs/sdks/javascript)
-- [discord](https://discord.gg/P7HaRayqTh)
