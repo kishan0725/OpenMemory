@@ -9,7 +9,7 @@ type ToolCallback = (args: any, extra?: any) => Promise<any> | any;
 interface ToolDef {
     name: string;
     description: string;
-    inputSchema: z.ZodType<any>;
+    inputSchema: z.ZodTypeAny;
     callback: ToolCallback;
 }
 
@@ -33,7 +33,9 @@ export class ToolRegistry {
         srv.setRequestHandler(ListToolsRequestSchema, async () => {
             return {
                 tools: Array.from(this.tools.values()).map(t => {
-                    const jsonSchema = zodToJsonSchema(t.inputSchema, {
+                    // Use any to bypass deep type instantiation
+                    const schema: any = t.inputSchema;
+                    const jsonSchema = zodToJsonSchema(schema, {
                         target: "jsonSchema2019-09"
                     }) as any;
 
