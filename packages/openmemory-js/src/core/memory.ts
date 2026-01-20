@@ -102,6 +102,18 @@ export class Memory {
         this.default_user = user_id || null;
     }
 
+    async add(content: string, opts?: MemoryOptions) {
+        const uid = opts?.user_id || this.default_user;
+        const tags = opts?.tags || [];
+        const meta = { ...opts };
+        delete meta.user_id;
+        delete meta.tags;
+
+        const tags_str = JSON.stringify(tags);
+
+        const res = await add_hsg_memory(content, tags_str, meta, uid ?? undefined);
+        return res;
+    }
 
     async get(id: string, opts?: { include_vectors?: boolean }) {
         const mem = await q.get_mem.get(id);
