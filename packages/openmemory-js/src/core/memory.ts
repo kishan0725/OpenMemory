@@ -147,6 +147,16 @@ export class Memory {
         return rows;
     }
 
+    async search(query: string, opts?: { user_id?: string, limit?: number, sectors?: string[] }) {
+        const k = opts?.limit || 10;
+        const uid = opts?.user_id || this.default_user;
+        const f: any = {};
+        if (uid) f.user_id = uid;
+        if (opts?.sectors) f.sectors = opts.sectors;
+
+        return await hsg_query(query, k, f);
+    }
+
     async wipe() {
         console.log("[Memory] Wiping DB...");
 
