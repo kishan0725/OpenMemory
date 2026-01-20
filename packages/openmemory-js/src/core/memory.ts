@@ -1,7 +1,6 @@
 
 import { add_hsg_memory, hsg_query } from "../memory/hsg";
 import { q, get_async } from "./db";
-import { j } from "../utils";
 import {
     insert_fact,
     batch_insert_facts,
@@ -37,20 +36,6 @@ export interface TemporalQueryOptions {
     object?: string;
     at?: Date;
     min_confidence?: number;
-    user_id?: string;
-}
-
-export interface UnifiedQueryOptions {
-    type?: 'contextual' | 'factual' | 'unified';
-    fact_pattern?: {
-        subject?: string;
-        predicate?: string;
-        object?: string;
-    };
-    at?: Date;
-    k?: number;
-    sector?: string;
-    min_salience?: number;
     user_id?: string;
 }
 
@@ -117,25 +102,6 @@ export class Memory {
         this.default_user = user_id || null;
     }
 
-    async add(content: string, opts?: MemoryOptions) {
-        const uid = opts?.user_id || this.default_user;
-        const tags = opts?.tags || [];
-        const meta = { ...opts };
-        delete meta.user_id;
-        delete meta.tags;
-
-
-
-
-
-
-        const tags_str = JSON.stringify(tags);
-
-
-
-        const res = await add_hsg_memory(content, tags_str, meta, uid ?? undefined);
-        return res;
-    }
 
     async get(id: string, opts?: { include_vectors?: boolean }) {
         const mem = await q.get_mem.get(id);
@@ -167,26 +133,6 @@ export class Memory {
         }
 
         return rows;
-    }
-
-    async search(query: string, opts?: { user_id?: string, limit?: number, sectors?: string[] }) {
-
-        const k = opts?.limit || 10;
-        const uid = opts?.user_id || this.default_user;
-        const f: any = {};
-        if (uid) f.user_id = uid;
-        if (opts?.sectors) f.sectors = opts.sectors;
-
-        return await hsg_query(query, k, f);
-    }
-
-    async delete_all(user_id?: string) {
-        const uid = user_id || this.default_user;
-        if (uid) {
-
-
-
-        }
     }
 
     async wipe() {
@@ -513,40 +459,27 @@ export class Memory {
     // ============================================
 
     /**
-     * Unified query across both HSG (contextual memory) and temporal graph (facts).
+     * Recall memories from HSG (contextual memory) and/or temporal graph (facts).
      *
-     * This is the most powerful query method, allowing you to search both systems simultaneously.
+     * This is the primary unified query method with a clean, intuitive API.
+     * It pairs semantically with store() for a consistent read/write interface.
      *
      * Query types:
-     *   - 'contextual': Search only HSG semantic memory (default)
+     *   - 'unified': Search both HSG and temporal facts (default)
+     *   - 'contextual': Search only HSG semantic memory
      *   - 'factual': Search only temporal facts
-     *   - 'unified': Search both systems and get combined results
      *
      * Examples:
-     *   queryUnified("What did John work on last year?", { type: 'unified', at: pastDate })
-     *   queryUnified("Find all employment facts", { type: 'factual', fact_pattern: { predicate: 'works_at' } })
+     *   recall("What did John work on last year?", { type: 'unified', at: pastDate })
+     *   recall("Find employment facts", { type: 'factual', fact_pattern: { predicate: 'works_at' } })
+     *   recall("Recent project work", { type: 'contextual', sector: 'episodic' })
      *
      * @param query - Free-form search text
      * @param opts - Query options for filtering and routing
      * @returns Results from HSG and/or temporal graph
      */
-    async queryUnified(
-        query: string,
-        opts?: UnifiedQueryOptions
-    ): Promise<{
-        contextual?: Array<{
-            id: string;
-            score: number;
-            content: string;
-            primary_sector: string;
-            sectors: string[];
-            salience: number;
-            last_seen_at: number;
-            path: string[];
-        }>;
-        factual?: Array<TemporalFact>;
-    }> {
-        const type = opts?.type || 'contextual';
+    async recall(query: string, opts?: RecallOptions): Promise<RecallResult> {
+        const type = opts?.type || 'unified';
         const at = opts?.at || new Date();
         const k = opts?.k || 8;
         const user_id = opts?.user_id || this.default_user;
@@ -586,121 +519,6 @@ export class Memory {
         }
 
         return results;
-    }
-
-    /**
-     * Recall memories from HSG (contextual memory) and/or temporal graph (facts).
-     *
-     * This is the primary unified query method with a clean, intuitive API.
-     * It pairs semantically with store() for a consistent read/write interface.
-     *
-     * Query types:
-     *   - 'unified': Search both HSG and temporal facts (default)
-     *   - 'contextual': Search only HSG semantic memory
-     *   - 'factual': Search only temporal facts
-     *
-     * Examples:
-     *   recall("What did John work on last year?", { type: 'unified', at: pastDate })
-     *   recall("Find employment facts", { type: 'factual', fact_pattern: { predicate: 'works_at' } })
-     *   recall("Recent project work", { type: 'contextual', sector: 'episodic' })
-     *
-     * @param query - Free-form search text
-     * @param opts - Query options for filtering and routing
-     * @returns Results from HSG and/or temporal graph
-     */
-    async recall(query: string, opts?: RecallOptions): Promise<RecallResult> {
-        // Default to 'unified' for recall (vs 'contextual' for queryUnified)
-        const type = opts?.type || 'unified';
-        return await this.queryUnified(query, { ...opts, type });
-    }
-
-    /**
-     * Store content in both HSG (contextual memory) and temporal graph (facts) simultaneously.
-     *
-     * This creates rich, interconnected memory by storing both:
-     * 1. Semantic/contextual representation in HSG for similarity search
-     * 2. Structured facts in temporal graph for precise querying
-     *
-     * Example:
-     *   addMemoryWithFacts(
-     *     "John started working at Acme Corp as a Software Engineer on Jan 1, 2023",
-     *     [
-     *       { subject: "John", predicate: "works_at", object: "Acme Corp" },
-     *       { subject: "John", predicate: "role", object: "Software Engineer" }
-     *     ],
-     *     { tags: ["employment"], user_id: "user_123" }
-     *   )
-     *
-     * @param content - Natural language text to store in HSG
-     * @param facts - Structured facts to extract and store in temporal graph
-     * @param opts - Optional tags, metadata, and user_id
-     * @returns IDs and metadata for both storage systems
-     */
-    async addMemoryWithFacts(
-        content: string,
-        facts: Array<{
-            subject: string;
-            predicate: string;
-            object: string;
-            confidence?: number;
-            valid_from?: Date;
-        }>,
-        opts?: MemoryOptions
-    ): Promise<{
-        hsg: {
-            id: string;
-            primary_sector: string;
-            sectors: string[];
-        };
-        temporal: Array<{
-            id: string;
-            subject: string;
-            predicate: string;
-            object: string;
-        }>;
-    }> {
-        const uid = opts?.user_id || this.default_user;
-        const tags = opts?.tags || [];
-        const meta = { ...opts };
-        delete meta.user_id;
-        delete meta.tags;
-
-        // Store in HSG
-        const hsg_result = await add_hsg_memory(
-            content,
-            JSON.stringify(tags),
-            meta,
-            uid ?? undefined
-        );
-
-        // Store facts in temporal graph with link to HSG memory using batch insert
-        const factsToInsert = facts.map(f => ({
-            subject: f.subject,
-            predicate: f.predicate,
-            object: f.object,
-            valid_from: f.valid_from || new Date(),
-            confidence: f.confidence ?? 1.0,
-            metadata: { ...meta, source_memory_id: hsg_result.id },
-            user_id: uid ?? undefined
-        }));
-
-        const fact_ids = await batch_insert_facts(factsToInsert);
-
-        const temporal_results = facts.map((fact, index) => ({
-            id: fact_ids[index],
-            subject: fact.subject,
-            predicate: fact.predicate,
-            object: fact.object,
-        }));
-
-        return {
-            hsg: {
-                id: hsg_result.id,
-                primary_sector: hsg_result.primary_sector,
-                sectors: hsg_result.sectors,
-            },
-            temporal: temporal_results,
-        };
     }
 
     /**
